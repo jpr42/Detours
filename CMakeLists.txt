@@ -6,21 +6,17 @@
 ##
 ##  Copyright (c) Microsoft Corporation.  All rights reserved.
 ##
-##  This is provided alongside (not as a replacement for) the NMake build
-##  driven by system.mak / src/Makefile / tests/Makefile.
+##  This is the sole build system for Detours, covering the full build/test/sample surface.
 ##
 
 cmake_minimum_required(VERSION 3.28.3)
 
-project(Detours
+project(DETOURS
     VERSION 4.0.1
     DESCRIPTION "Detours is a software package for monitoring and instrumenting API calls on Windows."
     HOMEPAGE_URL "https://github.com/microsoft/Detours"
     LANGUAGES CXX
 )
-
-enable_language(RC)
-enable_language(ASM_MASM)
 
 if(NOT WIN32)
     message(FATAL_ERROR "Detours only targets Windows; see https://github.com/microsoft/Detours/wiki/FAQ")
@@ -29,10 +25,10 @@ endif()
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
 
-# CMake's MSVC Debug default injects /RTC1 (runtime checks), which has no equivalent in the
-# original NMake build (its "Debug" is just the DETOUR_DEBUG=1 tracing macro, not a compiler
-# runtime-checks mode) and actively conflicts with samples that need /Zl (no default CRT lib
-# reference) or a non-default optimization level.
+# CMake's MSVC Debug default injects /RTC1 (runtime checks), which actively conflicts with
+# samples that need /Zl (no default CRT lib reference) or a non-default optimization level.
+# Detours' own Debug behavior is controlled separately via the DETOUR_DEBUG=1 tracing macro,
+# not compiler runtime checks.
 string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
 
 option(DETOURS_BUILD_TESTS "Build the Detours unit test suite" ${PROJECT_IS_TOP_LEVEL})

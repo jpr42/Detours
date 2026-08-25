@@ -43,6 +43,16 @@ target_link_libraries(unittests PRIVATE
 
 add_test(NAME unittests COMMAND unittests --reporter console --success --durations yes)
 
+# Guards against DETOURS_VERSION (src/detours.h) drifting from the project's own
+# VERSION (root CMakeLists.txt) -- the two are maintained by hand in separate files,
+# so nothing else catches them silently going out of sync.
+add_executable(version_check version_check.cpp)
+target_link_libraries(version_check PRIVATE Microsoft::detours)
+target_compile_definitions(version_check PRIVATE
+    DETOURS_EXPECTED_VERSION=0x${PROJECT_VERSION_MAJOR}c${PROJECT_VERSION_MINOR}c${PROJECT_VERSION_PATCH}
+)
+add_test(NAME version_check COMMAND version_check)
+
 # Each integration test spawns a nested CMake configure+build, so they're
 # noticeably slower than the unit tests; leave them opt-in for local
 # development and enable them in CI.

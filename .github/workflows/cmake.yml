@@ -2,13 +2,15 @@ name: CI-CMake
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, ci-verify-cmake-samples ] # TEMP: CI verification trigger, revert before PR
   pull_request:
     branches: [ main ]
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
+  security-events: write
 
 jobs:
   build:
@@ -36,6 +38,16 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
 
+      # Runs once, on the same job/matrix leg the old NMake-driven CI-Build
+      # workflow used (windows-2022, Debug) -- ported here since main.yml
+      # (and the NMake build it drove) has been removed.
+      - name: Initialize CodeQL for C++
+        uses: github/codeql-action/init@v4
+        if: ${{ matrix.toolset.os == 'windows-2022' && matrix.toolset.generator == 'Ninja Multi-Config' && matrix.arch == 'x64' && matrix.config == 'Debug' }}
+        with:
+          languages: cpp
+          config-file: ./.github/codeql/codeql-config.yml
+
       - name: Configure
         run: |
           $platformArg = @()
@@ -49,6 +61,10 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        if: ${{ matrix.toolset.os == 'windows-2022' && matrix.toolset.generator == 'Ninja Multi-Config' && matrix.arch == 'x64' && matrix.config == 'Debug' }}
 
   # Builds and runs on real ARM64 hardware (windows-11-arm) using cl.exe's
   # /arm64EC switch. CFLAGS/CXXFLAGS force /arm64EC because only the Visual

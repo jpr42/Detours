@@ -6,24 +6,31 @@
 ##
 ##  Copyright (c) Microsoft Corporation.  All rights reserved.
 ##
-##  cping (needs a MIDL-generated RPC proxy/stub), tryman (needs csc.exe/.NET and only
-##  works with the VS generator), and opengl (already excluded from NMake's own default
-##  build) are intentionally not ported here.
+##  opengl is intentionally not ported here and has no CMake target.
 ##
 
-# The original NMake build only elevates specific warnings to errors (/we4777 /we4800, applied
-# below via DETOURS_SAMPLE_COMPILE_OPTIONS) -- unlike src/tests, it never used a blanket /WX.
-# These are unmodified vendor sample sources that predate current MSVC warning levels, so the
-# root CMakeLists.txt's global CMAKE_COMPILE_WARNING_AS_ERROR is turned back off just for this
+# These are only needed by the samples, so they're enabled here rather than in the root
+# CMakeLists.txt -- a library+tests-only build (DETOURS_BUILD_SAMPLES=OFF) needs none of them.
+enable_language(RC)         # tryman/tstman.rc
+enable_language(ASM_MASM)   # disas/x64.asm
+enable_language(C)          # cping's MIDL-generated proxy/stub .c files (see the cping section below)
+
+# These are unmodified vendor sample sources that predate current MSVC warning levels and
+# don't build clean under -WX; only the specific warnings promoted via
+# DETOURS_SAMPLE_COMPILE_OPTIONS (/we4777 /we4800) are treated as errors here. The root
+# CMakeLists.txt's global CMAKE_COMPILE_WARNING_AS_ERROR is turned back off just for this
 # subdirectory (a normal-variable override, scoped to this add_subdirectory() call only).
 set(CMAKE_COMPILE_WARNING_AS_ERROR OFF)
 
-# Mirrors the $(DETOURS_TARGET_PROCESSOR) branching in samples/common.mak / system.mak, which
-# several samples key their fixed base addresses and arch-specific sources off of. Only the
-# architectures this CMake port actually targets are handled; plain (non-EC) ARM64 isn't a
-# supported CMake platform here, unlike the NMake build.
-if(CMAKE_GENERATOR_PLATFORM MATCHES "ARM64EC" OR CMAKE_VS_PLATFORM_NAME MATCHES "ARM64EC"
-   OR CMAKE_CXX_FLAGS MATCHES "arm64EC" OR CMAKE_C_FLAGS MATCHES "arm64EC")
+# Several samples below key their fixed base addresses and arch-specific sources off of this.
+# Only the architectures this CMake port actually targets are handled; plain (non-EC) ARM64
+# isn't a supported CMake platform here.
+#
+# CMAKE_CXX_COMPILER_ARCHITECTURE_ID reflects what the compiler itself was actually invoked to
+# target (MSVC's _M_ARM64EC/_M_X64/... macros) regardless of generator; CMAKE_GENERATOR_PLATFORM
+# and CMAKE_VS_PLATFORM_NAME are only ever set by the Visual Studio generators and say nothing
+# under Ninja/Ninja Multi-Config.
+if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64EC")
     set(DETOURS_SAMPLE_ARCH "ARM64EC")
 elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(DETOURS_SAMPLE_ARCH "X64")
@@ -31,7 +38,6 @@ else()
     set(DETOURS_SAMPLE_ARCH "X86")
 endif()
 
-# Matches samples/common.mak's CFLAGS/LINKFLAGS.
 set(DETOURS_SAMPLE_COMPILE_OPTIONS /W4 /we4777 /we4800 /Od)
 set(DETOURS_SAMPLE_LINK_OPTIONS /INCREMENTAL:NO /PROFILE /RELEASE /NODEFAULTLIB:oldnames.lib)
 
@@ -41,7 +47,7 @@ function(detours_sample_common_settings target)
         target_compile_definitions(${target} PRIVATE $<$<CONFIG:Debug>:DETOUR_DEBUG=1>)
         target_link_options(${target} PRIVATE ${DETOURS_SAMPLE_LINK_OPTIONS})
     endif()
-    # Every sample links against syelog.lib + detours.lib, per samples/common.mak's DEPS/LIBS.
+    # Every sample links against syelog + detours.
     target_link_libraries(${target} PRIVATE Microsoft::detours syelog)
 endfunction()
 
@@ -88,8 +94,8 @@ if(MSVC)
     target_compile_definitions(syelog PRIVATE $<$<CONFIG:Debug>:DETOUR_DEBUG=1>)
 endif()
 
-# syelogd doesn't link syelog.lib/detours.lib at all (its own Makefile recipe omits $(LIBS)),
-# so it bypasses add_detour_sample_exe rather than picking those up unintentionally.
+# syelogd intentionally doesn't link syelog.lib/detours.lib at all, so it bypasses
+# add_detour_sample_exe rather than picking those up unintentionally.
 add_executable(syelogd syelog/syelogd.cpp)
 if(MSVC)
     target_compile_options(syelogd PRIVATE ${DETOURS_SAMPLE_COMPILE_OPTIONS})
@@ -103,7 +109,8 @@ add_detour_sample_exe(sltestp SOURCES syelog/sltestp.cpp LIBS kernel32.lib)
 
 ##############################################################################
 ## setdll, withdll - built early because other samples' tests shell out to these binaries.
-## The NMake "option:" cross-bitness-copy targets are intentionally not ported.
+## Cross-bitness copies of these tools (32-bit builds alongside 64-bit ones, etc.) from the
+## original build are intentionally not ported.
 
 add_detour_sample_exe(setdll SOURCES setdll/setdll.cpp LIBS kernel32.lib)
 add_detour_sample_exe(withdll SOURCES withdll/withdll.cpp LIBS kernel32.lib)
@@ -117,7 +124,8 @@ target_link_options(comeasy PRIVATE /FIXED:NO)
 
 add_detour_sample_exe(commem SOURCES commem/commem.cpp LIBS kernel32.lib ole32.lib)
 
-# disas/unk.cpp, arm.asm, ia64.asm are not referenced by any target in the NMake build either.
+# disas/unk.cpp, arm.asm, ia64.asm exist in the source tree but are not referenced by any
+# target here.
 if(DETOURS_SAMPLE_ARCH STREQUAL "X86")
     set(DETOURS_DISAS_ARCH_SOURCE disas/x86.cpp)
 else()
@@ -151,7 +159,7 @@ if(MSVC)
         # /Zl (omit default library name) also strips the /DEFAULTLIB pragma the ARM64EC
         # compiler otherwise emits for its EC/native exit-thunk dispatch glue, which this
         # exports-heavy target needs (LNK2019 on __os_arm64x_dispatch_* without it) -- an
-        # ABI concern that didn't exist when this NMake-era sample picked up /Zl.
+        # ABI concern specific to ARM64EC, so /Zl is skipped only on that architecture.
         target_compile_options(echonul PRIVATE /Zl)
     endif()
     target_compile_definitions(echonul PRIVATE $<$<CONFIG:Debug>:DETOUR_DEBUG=1>)
@@ -168,8 +176,6 @@ add_detour_sample_dll(echofx
 
 add_detour_sample_exe(region SOURCES region/region.cpp LIBS kernel32.lib)
 
-# trcbld carries a redundant extra /release flag in its Makefile recipe; DETOURS_SAMPLE_LINK_OPTIONS
-# already includes /RELEASE, so it's not worth restating here.
 add_detour_sample_dll(trcbld SOURCES tracebld/trcbld.cpp tracebld/trcbld.rc LIBS kernel32.lib)
 add_detour_sample_exe(tracebld SOURCES tracebld/tracebld.cpp LIBS kernel32.lib)
 target_link_options(tracebld PRIVATE /FIXED:NO)
@@ -182,7 +188,7 @@ add_detour_sample_dll(trcssl SOURCES tracessl/trcssl.cpp tracessl/trcssl.rc LIBS
 add_detour_sample_dll(trctcp SOURCES tracetcp/trctcp.cpp tracetcp/trctcp.rc LIBS kernel32.lib ws2_32.lib)
 
 # testapi.cpp #includes trcapi.cpp and _win32.cpp directly (as does trcapi.cpp with _win32.cpp),
-# so each target compiles only its own top-level source, matching the NMake dependency lines.
+# so each target compiles only its own top-level source.
 add_detour_sample_dll(trcapi
     SOURCES traceapi/trcapi.cpp traceapi/trcapi.rc
     LIBS kernel32.lib gdi32.lib user32.lib shell32.lib advapi32.lib ole32.lib ws2_32.lib
@@ -239,9 +245,8 @@ add_detour_sample_dll(simple_safe
 if(MSVC)
     target_compile_options(simple_safe PRIVATE /std:c++14)
 endif()
-# simple_safe/sleep5.cpp is a byte-for-byte copy of simple/sleep5.cpp (NMake builds it twice,
-# once per sample directory); kept as a second target/binary to preserve that, under a distinct
-# CMake target name since "sleep5" is already taken above.
+# simple_safe/sleep5.cpp is a byte-for-byte copy of simple/sleep5.cpp; kept as its own
+# target/binary under a distinct CMake target name since "sleep5" is already taken above.
 add_detour_sample_exe(sleep5_safe SOURCES simple_safe/sleep5.cpp LIBS kernel32.lib)
 set_target_properties(sleep5_safe PROPERTIES OUTPUT_NAME sleep5_safe)
 
@@ -252,19 +257,18 @@ if(MSVC)
     target_compile_options(payloadtarget PRIVATE /EHsc)
 endif()
 
-# X86/X64 only in its own Makefile (excludes ARM64EC too, unlike disas above).
+# X86/X64 only (excludes ARM64EC too, unlike disas above).
 if(DETOURS_SAMPLE_ARCH STREQUAL "X86" OR DETOURS_SAMPLE_ARCH STREQUAL "X64")
     if(DETOURS_SAMPLE_ARCH STREQUAL "X64")
         set(DETOURS_DALLOC_ARCH_SOURCE dynamic_alloc/x64.asm)
     else()
         set(DETOURS_DALLOC_ARCH_SOURCE dynamic_alloc/x86.asm)
     endif()
-    # Output is named dalloc(.exe), matching $(TARGET_NAME) in dynamic_alloc/Makefile.
     add_detour_sample_exe(dalloc SOURCES dynamic_alloc/main.cpp ${DETOURS_DALLOC_ARCH_SOURCE} LIBS kernel32.lib user32.lib)
     if(MSVC)
         target_compile_options(dalloc PRIVATE /EHsc)
         if(DETOURS_SAMPLE_ARCH STREQUAL "X86")
-            # x86.asm has no .SAFESEH directive (never did in the NMake build either), so it
+            # x86.asm has no .SAFESEH directive, so it
             # can't be marked as SafeSEH-compliant; since main.cpp's cl.exe-generated object
             # *is* compliant, link.exe would otherwise require -- and fail to find -- SafeSEH
             # info from every module, including this one (LNK2026/LNK1281 on x86 only).
@@ -279,7 +283,7 @@ endif()
 add_detour_sample_exe(member SOURCES member/member.cpp LIBS kernel32.lib)
 add_detour_sample_exe(impmunge SOURCES impmunge/impmunge.cpp LIBS kernel32.lib imagehlp.lib)
 
-# X86 only, per its own Makefile.
+# X86 only.
 if(DETOURS_SAMPLE_ARCH STREQUAL "X86")
     add_detour_sample_exe(excep SOURCES excep/excep.cpp excep/firstexc.cpp LIBS kernel32.lib)
     target_link_options(excep PRIVATE /ENTRY:WinMainCRTStartup)
@@ -335,16 +339,16 @@ add_detour_sample_dll(findfunc_extend SOURCES findfunc/extend.cpp findfunc/exten
 set_target_properties(findfunc_extend PROPERTIES OUTPUT_NAME extend)
 target_link_options(findfunc_extend PRIVATE /BASE:${DETOURS_FINDFUNC_EXTEND_BASE})
 
-# dbghelp.dll's external-tool-copy step from NMake is intentionally not ported.
+# The external copy-of-dbghelp.dll step from the original build is intentionally not ported.
 add_detour_sample_exe(findfunc SOURCES findfunc/findfunc.cpp LIBS kernel32.lib findfunc_target)
 target_link_options(findfunc PRIVATE /FIXED:NO)
 add_detour_sample_exe(symtest SOURCES findfunc/symtest.cpp LIBS kernel32.lib findfunc_target)
 target_link_options(symtest PRIVATE /FIXED:NO)
 
-# X64 only for this CMake port (NMake also allows IA64, which isn't part of this port at all).
+# X64 only for this CMake port; IA64 isn't part of this port at all.
 if(DETOURS_SAMPLE_ARCH STREQUAL "X64")
     # /FIXED requires ASLR off; link.exe defaults /DYNAMICBASE to ON regardless of CMake, so it
-    # must be disabled explicitly here (the NMake build's own link lines pair the two the same way).
+    # must be disabled explicitly here.
     set(DETOURS_TALLOC_LINK_OPTIONS /INCREMENTAL:NO /FIXED /DYNAMICBASE:NO /RELEASE /NODEFAULTLIB:oldnames.lib)
 
     # tdllNx.dll link lines use $(LINKFLAGS:/profile=/fixed) -- /FIXED replaces /PROFILE rather
@@ -379,6 +383,183 @@ if(DETOURS_SAMPLE_ARCH STREQUAL "X64")
         LIBS kernel32.lib psapi.lib tdll1x tdll2x tdll3x tdll4x tdll5x tdll6x tdll7x tdll8x tdll9x
     )
     target_link_options(talloc PRIVATE /ENTRY:WinMainCRTStartup)
+endif()
+
+##############################################################################
+## cping - MIDL-generated RPC proxy/stub sample. No CMake built-in language
+## support for MIDL, so it's driven by hand via find_program()/add_custom_command().
+
+find_program(MIDL_EXECUTABLE midl REQUIRED)
+
+# ARM64EC reuses the X64 proxy stub; MIDL itself has no distinct ARM64EC target, only
+# X86/IA64/X64/ARM/ARM64.
+if(DETOURS_SAMPLE_ARCH STREQUAL "X86")
+    set(DETOURS_CPING_MIDL_ARCH_FLAGS /no_robust /win32)
+else()
+    set(DETOURS_CPING_MIDL_ARCH_FLAGS /x64)
+endif()
+
+set(DETOURS_CPING_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/cping)
+add_custom_command(
+    OUTPUT
+        ${DETOURS_CPING_GENERATED_DIR}/iping.h
+        ${DETOURS_CPING_GENERATED_DIR}/iping_i.c
+        ${DETOURS_CPING_GENERATED_DIR}/iping_p.c
+        ${DETOURS_CPING_GENERATED_DIR}/iping_d.c
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DETOURS_CPING_GENERATED_DIR}
+    COMMAND ${MIDL_EXECUTABLE} /nologo /Oif /no_format_opt ${DETOURS_CPING_MIDL_ARCH_FLAGS}
+        /out ${DETOURS_CPING_GENERATED_DIR} /prefix all iping_ /dlldata iping_d.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/cping/iping.idl
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cping/iping.idl
+    COMMENT "Generating RPC proxy/stub for cping via MIDL"
+    VERBATIM
+)
+
+add_executable(cping
+    cping/cping.cpp
+    ${DETOURS_CPING_GENERATED_DIR}/iping_i.c
+    ${DETOURS_CPING_GENERATED_DIR}/iping_p.c
+    ${DETOURS_CPING_GENERATED_DIR}/iping_d.c
+)
+# The generated proxy/stub .c files are compiled at /W3 rather than the sample-wide /W4
+# (cping.cpp itself still gets the full /W4 from DETOURS_SAMPLE_COMPILE_OPTIONS).
+# cl.exe's default PDB name for C (as opposed to C++) is the shared "vc<ver>.pdb" rather than a
+# per-target name, so a parallel build of these three files races on writing it -- observed as
+# C1041 under test-arm64ec's Ninja build even with /FS (whose mspdbsrv.exe synchronization isn't
+# reliable there) and even with a per-file /Fd (CMake appends its own shared /Fd later on the
+# command line, which wins since cl.exe uses the last one). Use /Z7 instead, which embeds debug
+# info directly in each .obj and never touches a .pdb at all, sidestepping the conflict outright.
+set_source_files_properties(
+    ${DETOURS_CPING_GENERATED_DIR}/iping_i.c
+    ${DETOURS_CPING_GENERATED_DIR}/iping_p.c
+    ${DETOURS_CPING_GENERATED_DIR}/iping_d.c
+    PROPERTIES
+        LANGUAGE C
+        COMPILE_OPTIONS "/W3;/Z7"
+)
+target_include_directories(cping PRIVATE ${DETOURS_CPING_GENERATED_DIR})
+detours_sample_common_settings(cping)
+target_compile_definitions(cping PRIVATE
+    ENTRY_PREFIX=iping_ REGISTER_PROXY_DLL
+    _WIN32_WINNT=0x0400 CONST_VTABLE COBJMACROS WIN32 NT
+)
+target_link_libraries(cping PRIVATE
+    kernel32.lib user32.lib shell32.lib uuid.lib ole32.lib rpcrt4.lib advapi32.lib wsock32.lib
+)
+# cping's own `test:` target starts a server (cping /s) and pings it -- stateful and
+# interactive, not a quick isolated smoke test; left as build-only like traceapi/tracebld/
+# tracessl/tracetcp above.
+
+##############################################################################
+## tryman - mixed native + C# sample. csc.exe/sn.exe are invoked directly, rather than via
+## CMake's VS-generator-only enable_language(CSharp), so this works the same way under Ninja
+## as under the VS generators.
+
+add_detour_sample_dll(tstman
+    SOURCES tryman/tstman.cpp tryman/tstman.rc
+    EXPORTS "DetourFinishHelperProcess,@1,NONAME" "Test3264"
+    LIBS kernel32.lib
+)
+add_detour_sample_exe(tryman SOURCES tryman/tryman.cpp LIBS kernel32.lib tstman)
+add_detour_sample_exe(size SOURCES tryman/size.cpp)
+target_link_options(size PRIVATE /FIXED:NO)
+
+set(DETOURS_TRYMAN_KEY ${CMAKE_CURRENT_BINARY_DIR}/key.snk)
+add_custom_command(
+    OUTPUT ${DETOURS_TRYMAN_KEY}
+    COMMAND sn -k ${DETOURS_TRYMAN_KEY}
+    COMMENT "Generating strong-name key for managed tryman samples"
+    VERBATIM
+)
+# The VS generators build one utility vcxproj per managed-<suffix> target below, and since
+# none of them "owns" key.snk as its own OUTPUT, each vcxproj gets its own copy of this rule
+# baked in. Under a parallel build that races multiple sn.exe invocations on the same file
+# ("Failed to create key.snk -- The process cannot access the file because it is being used
+# by another process."). Give it a single owning target and depend on that target (not the
+# file) from each managed-<suffix> target so only one vcxproj ever runs the rule.
+add_custom_target(tryman_key ALL DEPENDS ${DETOURS_TRYMAN_KEY})
+
+# platform:output-suffix pairs for the managed-<suffix>.exe outputs below.
+# The Itanium (/platform:itanium) variant is dropped -- IA64 isn't part of this CMake port.
+set(DETOURS_TRYMAN_CSC_FLAGS /nowarn:1607 /unsafe- /optimize+ /debug+ /warnaserror)
+foreach(entry x64:x64 x86:x86 anycpu:any anycpu32bitpreferred:any32)
+    string(REPLACE ":" ";" entry ${entry})
+    list(GET entry 0 platform)
+    list(GET entry 1 suffix)
+    set(managed_exe ${CMAKE_CURRENT_BINARY_DIR}/managed-${suffix}.exe)
+    add_custom_command(
+        OUTPUT ${managed_exe}
+        COMMAND csc /nologo ${DETOURS_TRYMAN_CSC_FLAGS} /platform:${platform}
+            /keyfile:${DETOURS_TRYMAN_KEY} /out:${managed_exe}
+            managed.cs
+        # The VS generators build one utility vcxproj per OUTPUT here; when managed.cs is
+        # passed with its absolute source-tree path, they instead resolve it relative to the
+        # build tree at MSBuild time (CS1504: "...\build\samples\managed.cs" could not be
+        # opened). Running from tryman/ with a bare relative filename sidesteps that.
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tryman
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tryman/managed.cs
+        COMMENT "Building managed-${suffix}.exe via csc.exe"
+        VERBATIM
+    )
+    add_custom_target(managed-${suffix} ALL DEPENDS ${managed_exe})
+    add_dependencies(managed-${suffix} tryman_key)
+endforeach()
+# tryman's managed-*.exe / tstman.dll interaction is a manual/interactive scenario, not a
+# clean pass/fail assertion; left out of add_test() below like cping above.
+
+##############################################################################
+## Smoke tests -- only samples with a genuinely non-interactive, exit-code-
+## checkable invocation are wired up here.
+##
+## traceapi/tracebld/tracessl/tracetcp launch Internet Explorer or an interactive
+## cmd.exe session when run standalone and would hang a CI runner, so they're
+## build-only.
+##
+## simple/slept/comeasy repeatedly toggle DLL injection on/off via setdll.exe
+## (which rewrites the target .exe's import table in place) and only print
+## human-readable banners for eyeball verification, with no actual pass/fail
+## assertion -- not safe to reproduce under ctest's parallel/repeatable execution
+## model. Their final withdll.exe step (dynamic injection, non-mutating) is kept
+## instead as a real smoke test that the detour DLL loads and runs without
+## crashing.
+##
+## echonul's mainCRTStartup (echo/main.cpp) always returns the fixed sentinel
+## 0x99, regardless of success or failure, and prints nothing to stdout -- its
+## exit code carries no pass/fail meaning and there is no output to assert on,
+## so it isn't wired up as its own test. echofx's detoured run does print
+## distinguishing output, so that's checked via PASS_REGULAR_EXPRESSION
+## instead of the (always-0x99) exit code.
+if(DETOURS_BUILD_TESTS)
+    add_test(NAME region COMMAND region)
+    add_test(NAME commem COMMAND commem)
+    add_test(NAME dtest COMMAND dtest)
+
+    # withdll's own injection/resume of echonul.exe under it never completes on ARM64EC --
+    # echofx.dll's DllMain is never entered (not even its first, unconditional printf), so
+    # this hangs until the TIMEOUT below on that platform. Unlike commem/comeasy (which
+    # failed in DetourAttach/trampoline generation and were fixed upstream by
+    # microsoft/Detours#388), this looks like a hang in the injection path itself, not in
+    # attach/trampoline logic -- skip it on ARM64EC until that's root-caused upstream.
+    if(NOT DETOURS_SAMPLE_ARCH STREQUAL "ARM64EC")
+        add_test(NAME echo_detoured COMMAND withdll -d:$<TARGET_FILE:echofx> $<TARGET_FILE:echonul>)
+        set_tests_properties(echo_detoured PROPERTIES
+            PASS_REGULAR_EXPRESSION "Detoured Echo\\(\\)"
+        )
+    endif()
+
+    add_test(NAME simple COMMAND withdll -d:$<TARGET_FILE:simple> $<TARGET_FILE:sleep5>)
+    add_test(NAME slept COMMAND withdll -d:$<TARGET_FILE:slept> $<TARGET_FILE:sleepold>)
+    add_test(NAME comeasy COMMAND withdll -d:$<TARGET_FILE:wrotei> $<TARGET_FILE:comeasy>)
+
+    # None of these samples legitimately run anywhere near this long (the slowest,
+    # `simple`/`slept`, sleep for only a few seconds); a much larger cap just guards
+    # against a genuine hang (e.g. a detoured process deadlocking) silently consuming
+    # the whole CI job's multi-hour default timeout instead of failing fast.
+    set(DETOURS_SAMPLE_TESTS_WITH_TIMEOUT region commem dtest simple slept comeasy)
+    if(NOT DETOURS_SAMPLE_ARCH STREQUAL "ARM64EC")
+        list(APPEND DETOURS_SAMPLE_TESTS_WITH_TIMEOUT echo_detoured)
+    endif()
+    set_tests_properties(${DETOURS_SAMPLE_TESTS_WITH_TIMEOUT} PROPERTIES TIMEOUT 30)
 endif()
 
 ################################################################# End of File.

@@ -37,8 +37,6 @@ obj.*
 *.user
 *.recipe
 /bin.*
-*.vcxproj.FileListAbsolute.txt
-*.vcxprojAssemblyReference.cache
 
 # CMake
 build*/

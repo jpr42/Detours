@@ -35,8 +35,7 @@ if(MSVC)
     target_compile_options(detours PRIVATE
         /W4
         /we4777 /we4800     # format-string and BOOL-truncation bugs are easy to introduce against the raw WinAPI; promote them to hard errors too
-        /Gy     # function-level linking; matches src/Makefile's unconditional CFLAGS
-                # (not a CMake default -- checked Windows-MSVC.cmake)
+        /Gy     # function-level linking (not a CMake default -- checked Windows-MSVC.cmake)
         /Zl     # omit the default library name so consumers pick their own CRT
         /Od     # detours patches raw machine code; optimized codegen has broken this historically
     )
